@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pysigslot"
+version = "0.1.0"
+description = "A lightweight, Qt-inspired Signal/Slot event implementation for Python."
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [
+    { name = "vanlocvo" }
+]
+keywords = ["signal", "slot", "event", "qt", "async", "event-driven"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = []
+
+[project.urls]
+"Homepage" = "https://github.com/vanlocvo/pysigslot"
+"Bug Tracker" = "https://github.com/vanlocvo/pysigslot/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
