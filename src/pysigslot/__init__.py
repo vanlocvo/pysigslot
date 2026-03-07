@@ -216,6 +216,43 @@ class Signal(Generic[P]):
                     exc_info=True,
                 )
 
+    def emit_sync(self, access_key: Any, *args: P.args, **kwargs: P.kwargs) -> None:
+        """
+        Emit this signal synchronously.
+        
+        Use this when calling the Signal from a non-async function and
+        ensuring that all connected handlers are synchronous functions.
+        
+        Args:
+            access_key: Must match the key provided at initialization.
+            *args:       positional arguments forwarded to handlers
+            **kwargs:    keyword arguments forwarded to handlers
+            
+        Raises:
+            PermissionError: If the access key is incorrect.
+            RuntimeError: If any connected handler is an async function.
+        """
+        if access_key is not self._access_key:
+            raise PermissionError(f"Invalid access key for emit_sync on '{self._name}' signal.")
+
+        for handler in self._handlers:
+            if asyncio.iscoroutinefunction(handler):
+                handler_name = getattr(handler, "__name__", repr(handler))
+                raise RuntimeError(
+                    f"Cannot call async handler '{handler_name}' from emit_sync. "
+                    f"Use emit() instead or ensure only sync handlers are connected to '{self._name}'."
+                )
+
+            try:
+                handler(*args, **kwargs)
+            except Exception:  # noqa: BLE001
+                handler_name = getattr(handler, "__name__", repr(handler))
+                logger.error(
+                    "Signal '%s' handler '%s' raised an exception in emit_sync",
+                    self._name, handler_name,
+                    exc_info=True,
+                )
+
     def clear(self, access_key: Any) -> None:
         """
         Disconnect all handlers. Requires the access key.
