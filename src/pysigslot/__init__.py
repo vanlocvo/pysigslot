@@ -42,19 +42,21 @@ Usage:
 import asyncio
 import logging
 import weakref
-from typing import Any, Callable, Coroutine
+from typing import Any, Callable, Coroutine, Generic, ParamSpec
 
 __version__ = "0.1.0"
 __all__ = ["Signal"]
 
 logger = logging.getLogger("pysigslot")
 
-AsyncHandler = Callable[..., Coroutine[Any, Any, None]]
-SyncHandler = Callable[..., None]
-Handler = AsyncHandler | SyncHandler
+P = ParamSpec("P")
+
+AsyncHandler = Callable[P, Coroutine[Any, Any, None]]
+SyncHandler = Callable[P, None]
+Handler = AsyncHandler[P] | SyncHandler[P]
 
 
-class SignalConnection:
+class SignalConnection(Generic[P]):
     """
     Represents a connection between a Signal and a handler.
 
@@ -69,7 +71,7 @@ class SignalConnection:
 
     __slots__ = ("_signal_ref", "_handler", "_is_connected")
 
-    def __init__(self, signal: "Signal", handler: Handler) -> None:
+    def __init__(self, signal: "Signal[P]", handler: Handler[P]) -> None:
         self._signal_ref = weakref.ref(signal)
         self._handler = handler
         self._is_connected = True
@@ -97,7 +99,7 @@ class SignalConnection:
         return f"<SignalConnection {status} handler={handler_name}>"
 
 
-class Signal:
+class Signal(Generic[P]):
     """
     A signal that can be connected to multiple handlers (slots).
 
@@ -135,7 +137,7 @@ class Signal:
 
     # ── Handler management ─────────────────────────────────────────
 
-    def __call__(self, handler: Handler) -> Handler:
+    def __call__(self, handler: Handler[P]) -> Handler[P]:
         """
         Decorator usage: connect a handler permanently, returning the handler.
 
@@ -148,7 +150,7 @@ class Signal:
             self._handlers.append(handler)
         return handler
 
-    def connect(self, handler: Handler) -> SignalConnection:
+    def connect(self, handler: Handler[P]) -> SignalConnection[P]:
         """
         Connect a handler and return a SignalConnection.
 
@@ -164,7 +166,7 @@ class Signal:
             self._handlers.append(handler)
         return SignalConnection(self, handler)
 
-    def disconnect(self, handler: Handler) -> None:
+    def disconnect(self, handler: Handler[P]) -> None:
         """
         Disconnect a handler from this signal.
 
@@ -183,7 +185,9 @@ class Signal:
 
     # ── Protected Operations (Requires Key) ────────────────────────
 
-    async def emit(self, access_key: Any, *args: Any, **kwargs: Any) -> None:
+    async def emit(
+        self, access_key: Any, *args: P.args, **kwargs: P.kwargs
+    ) -> None:
         """
         Emit this signal, calling all connected handlers.
 
