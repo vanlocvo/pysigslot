@@ -71,32 +71,26 @@ async def test_disconnect_manual():
     assert len(calls) == 1
 
 @pytest.mark.asyncio
-async def test_auto_disconnect_on_gc():
+async def test_no_auto_disconnect_on_gc():
+    """Dropping a SignalConnection reference must NOT auto-disconnect.
+    The handler stays connected until disconnect() is called explicitly."""
     key = object()
     sig: Signal[[]] = Signal("test_gc", key)
-    
+
     calls = []
     def handler():
         calls.append(1)
-        
-    # Create connection in a local scope
-    def _setup():
-        conn = sig.connect(handler)
-        return conn
 
-    conn = _setup()
+    conn = sig.connect(handler)
     assert sig.handler_count == 1
-    
-    # Delete connection to trigger garbage collection
+
+    # Drop the reference — connection must survive GC
     del conn
-    
-    # Disconnect in __del__ happens right away in CPython,
-    # but to be safe we can run a gc collect.
     gc.collect()
-    
-    assert sig.handler_count == 0
+
+    assert sig.handler_count == 1
     await sig.emit(key)
-    assert len(calls) == 0
+    assert len(calls) == 1
 
 @pytest.mark.asyncio
 async def test_decorator():

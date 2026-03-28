@@ -33,10 +33,9 @@ Usage:
     async def on_data(data):
         print(f"Data: {data}")
 
-    # ── Explicit usage (auto-disconnect when connection is destroyed) ──
+    # ── Explicit usage (disconnect manually when done) ──
     conn = obj.sig_data_ready.connect(some_handler)
     conn.disconnect()   # manual disconnect
-    # or let `conn` go out of scope → auto-disconnects
 """
 
 import asyncio
@@ -44,7 +43,7 @@ import logging
 import weakref
 from typing import Any, Callable, Coroutine, Generic, ParamSpec
 
-__version__ = "0.1.0"
+__version__ = "0.3.0"
 __all__ = ["Signal"]
 
 logger = logging.getLogger("pysigslot")
@@ -60,13 +59,14 @@ class SignalConnection(Generic[P]):
     """
     Represents a connection between a Signal and a handler.
 
-    Returned by Signal.connect(). Auto-disconnects when this object
-    is garbage-collected (destructor).
+    Returned by Signal.connect(). The Signal holds a strong reference to this
+    object, so the caller does NOT need to keep it alive — the connection
+    persists until disconnect() is called explicitly or the Signal is cleared.
 
     Usage:
-        conn = some_signal.connect(my_handler)
-        conn.disconnect()   # explicit
-        # or let `conn` go out of scope → auto-disconnects
+        sig.connect(my_handler)          # caller can discard the return value
+        conn = sig.connect(my_handler)   # or keep it for later disconnect
+        conn.disconnect()                # explicit disconnect
     """
 
     __slots__ = ("_signal_ref", "_handler", "_is_connected")
@@ -82,16 +82,20 @@ class SignalConnection(Generic[P]):
             return
         self._is_connected = False
         signal_obj = self._signal_ref()
-        if signal_obj is not None and self._handler in signal_obj._handlers:
-            signal_obj._handlers.remove(self._handler)
+        if signal_obj is not None:
+            try:
+                signal_obj._handlers.remove(self._handler)
+            except ValueError:
+                pass
+            try:
+                signal_obj._connections.remove(self)
+            except ValueError:
+                pass
 
     @property
     def is_connected(self) -> bool:
         """Whether this connection is still active."""
         return self._is_connected
-
-    def __del__(self) -> None:
-        self.disconnect()
 
     def __repr__(self) -> str:
         status = "connected" if self._is_connected else "disconnected"
@@ -110,7 +114,7 @@ class Signal(Generic[P]):
 
     Two connection styles:
         @signal          — decorator, returns handler (permanent)
-        signal.connect() — returns SignalConnection (auto-disconnect on destruction)
+        signal.connect() — returns SignalConnection (disconnect explicitly via .disconnect())
 
     Methods:
         connect(handler)           — connect; returns SignalConnection
@@ -119,7 +123,7 @@ class Signal(Generic[P]):
         clear(access_key)          — disconnect all handlers (requires secret key)
     """
 
-    __slots__ = ("_name", "_access_key", "_handlers", "__weakref__")
+    __slots__ = ("_name", "_access_key", "_handlers", "_connections", "__weakref__")
 
     def __init__(self, name: str = "", access_key: Any = None):
         """
@@ -134,6 +138,7 @@ class Signal(Generic[P]):
         self._name = name
         self._access_key = access_key if access_key is not None else object()
         self._handlers: list[Handler] = []
+        self._connections: list[SignalConnection] = []
 
     # ── Handler management ─────────────────────────────────────────
 
@@ -154,17 +159,21 @@ class Signal(Generic[P]):
         """
         Connect a handler and return a SignalConnection.
 
-        The connection auto-disconnects when garbage-collected.
+        The Signal holds a strong reference to the returned SignalConnection,
+        so the caller does not need to store it. The connection remains active
+        until disconnect() is called explicitly or the Signal is cleared.
 
         Args:
             handler: sync or async callable to invoke on emit
 
         Returns:
-            SignalConnection that can disconnect() manually or auto-disconnects
+            SignalConnection that can be disconnected via disconnect()
         """
         if handler not in self._handlers:
             self._handlers.append(handler)
-        return SignalConnection(self, handler)
+        conn = SignalConnection(self, handler)
+        self._connections.append(conn)
+        return conn
 
     def disconnect(self, handler: Handler[P]) -> None:
         """
@@ -260,6 +269,9 @@ class Signal(Generic[P]):
         if access_key is not self._access_key:
             raise PermissionError(f"Invalid access key for clear on '{self._name}' signal.")
         self._handlers.clear()
+        for conn in self._connections:
+            conn._is_connected = False
+        self._connections.clear()
 
     @property
     def handler_count(self) -> int:
